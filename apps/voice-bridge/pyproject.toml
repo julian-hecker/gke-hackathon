@@ -1,0 +1,25 @@
+[project]
+name = "voice-bridge"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [{ name = "Julian Hecker" }]
+requires-python = ">=3.13"
+dependencies = [
+    "adk-agents",
+    "audioop-lts==0.2.2 ; python_full_version >= '3.13'",
+    "fastapi[standard]>=0.116.1",
+    "numpy>=2.3.2",
+    "soxr>=0.5.0.post1",
+    "twilio>=9.7.2",
+]
+
+[project.scripts]
+voice-bridge = "voice_bridge:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+adk-agents = { workspace = true }
