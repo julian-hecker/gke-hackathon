@@ -149,6 +149,7 @@ async def twilio_websocket(ws: WebSocket):
     except Exception as ex:
         logger.error(f"Unexpected Error: {ex}")
     finally:
+        live_request_queue.close()
         await ws.close()
 
     # https://www.twilio.com/docs/voice/media-streams/websocket-messages
