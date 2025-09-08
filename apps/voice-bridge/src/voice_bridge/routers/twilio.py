@@ -1,10 +1,18 @@
 import asyncio
 import base64
 from typing import Annotated
+
 from fastapi import APIRouter, Form, Request, Response, WebSocket
 from fastapi.params import Depends
 from fastapi.responses import HTMLResponse
 from twilio.twiml.voice_response import Connect, Stream, VoiceResponse
+
+from adk_agents.runtime.live_messaging import (
+    AgentEvent,
+    agent_to_client_messaging,
+    send_pcm_to_agent,
+    start_agent_session,
+)
 
 from voice_bridge.entities.twilio import (
     TwilioStreamCallbackPayload,
@@ -59,62 +67,85 @@ def twilio_callback(payload: Annotated[TwilioStreamCallbackPayload, Form()]):
 # TODO: Figure out how to validate Twilio signature in a WebSocket
 # https://www.twilio.com/docs/usage/webhooks/webhooks-security
 # Headers({'host': 'amazing-sincere-grouse.ngrok-free.app', 'user-agent': 'Twilio.TmeWs/1.0', 'connection': 'Upgrade', 'sec-websocket-key': '', 'sec-websocket-version': '13', 'upgrade': 'websocket', 'x-forwarded-for': '98.84.178.199', 'x-forwarded-host': 'amazing-sincere-grouse.ngrok-free.app', 'x-forwarded-proto': 'https', 'x-twilio-signature': '', 'accept-encoding': 'gzip'})
+
+
 @router.websocket(stream_path)
-async def twilio_ws(ws: WebSocket):
+async def twilio_websocket(ws: WebSocket):
     """Handle Twilio Media Stream WebSocket connection"""
 
-    async def on_agent_audio_24k(pcm24: bytes):
-        payload = None # todo: convert to 8k mulaw
+    await ws.accept()
+    await ws.receive_json()  # throw away `connected` event
+
+    start_event = await ws.receive_json()
+    assert start_event["event"] == "start"
+
+    # account_sid = start_event["start"]["accountSid"]
+    call_sid = start_event["start"]["callSid"]
+    # encoding = start_event["start"]["mediaFormat"]["encoding"]
+    # sample_rate = start_event["start"]["mediaFormat"]["sampleRate"]
+    # channels = start_event["start"]["mediaFormat"]["channels"]
+    from_phone = start_event["start"]["customParameters"]["from_phone"]
+    # to_phone = start_event["start"]["customParameters"]["to_phone"]
+    stream_sid = start_event["streamSid"]
+
+    live_events, live_request_queue = await start_agent_session(from_phone, call_sid)
+
+    async def handle_agent_event(event: AgentEvent):
+        """Handle outgoing AgentEvent to Twilio WebSocket"""
+        logger.debug(event)
+        if event.type == "complete":
+            # mark twilio buffer
+            # https://www.twilio.com/docs/voice/media-streams/websocket-messages#mark-message
+            return
+        if event.type == "interrupted":
+            # https://www.twilio.com/docs/voice/media-streams/websocket-messages#send-a-clear-message
+            return await ws.send_json({"event": "clear", "streamSid": stream_sid})
+
+        payload = adk_pcm24k_to_twilio_ulaw8k(event.payload)
+
         await ws.send_json(
             {
                 "event": "media",
-                "streamSid": streamSid,
+                "streamSid": stream_sid,
                 "media": {"payload": payload},
             }
         )
 
-    try:
-        await ws.accept()
-        await ws.receive_json()  # throw away `connected` event
-
-        start_event = await ws.receive_json()
-        assert start_event["event"] == "start"
-
-        accountSid = start_event["start"]["accountSid"]
-        callSid = start_event["start"]["callSid"]
-        encoding = start_event["start"]["mediaFormat"]["encoding"]
-        sampleRate = start_event["start"]["mediaFormat"]["sampleRate"]
-        channels = start_event["start"]["mediaFormat"]["channels"]
-        from_phone = start_event["start"]["customParameters"]["from_phone"]
-        to_phone = start_event["start"]["customParameters"]["to_phone"]
-        streamSid = start_event["streamSid"]
-
-        logger.info(
-            f"accountSid: {accountSid}, callSid: {callSid}, encoding: {encoding}, sampleRate: {sampleRate}, channels: {channels}, from_phone: {from_phone}, to_phone: {to_phone}, streamSid: {streamSid}"
-        )
-
+    async def websocket_loop():
+        """
+        Handle incoming WebSocket messages to Agent.
+        """
         while True:
             event = await ws.receive_json()
-
             event_type = event["event"]
 
-            if event_type == "media":
-                payload = event["media"]["payload"]
-                mulaw_bytes = base64.b64decode(payload)
-                pcm_bytes = twilio_ulaw8k_to_adk_pcm16k(mulaw_bytes)
+            if event_type == "stop":
+                logger.debug(f"Call ended by Twilio. Stream SID: {stream_sid}")
+                break
 
-                # await agent live session here
+            if event_type == "start" or event_type == "connected":
+                logger.warning(f"Unexpected Twilio Initialization event: {event}")
+                continue
 
             elif event_type == "dtmf":
                 digit = event["dtmf"]["digit"]
-                logger.info(digit)
+                logger.info(f"DTMF: {digit}")
+                continue
 
-            elif event_type == "stop":
-                logger.info("Twilio Media Stream Stopped")
-                break
+            elif event_type == "mark":
+                logger.info(f"Twilio sent a Mark Event: {event}")
+                continue
 
-    except asyncio.exceptions.CancelledError:
-        raise
+            elif event_type == "media":
+                payload = event["media"]["payload"]
+                mulaw_bytes = base64.b64decode(payload)
+                pcm_bytes = twilio_ulaw8k_to_adk_pcm16k(mulaw_bytes)
+                send_pcm_to_agent(pcm_bytes, live_request_queue)
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(websocket_loop())
+            tg.create_task(agent_to_client_messaging(handle_agent_event, live_events))
     except Exception as ex:
         logger.error(f"Unexpected Error: {ex}")
     finally:
