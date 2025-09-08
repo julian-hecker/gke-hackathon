@@ -101,7 +101,8 @@ async def twilio_websocket(ws: WebSocket):
             # https://www.twilio.com/docs/voice/media-streams/websocket-messages#send-a-clear-message
             return await ws.send_json({"event": "clear", "streamSid": stream_sid})
 
-        payload = adk_pcm24k_to_twilio_ulaw8k(event.payload)
+        ulaw_bytes = adk_pcm24k_to_twilio_ulaw8k(event.payload)
+        payload = base64.b64encode(ulaw_bytes).decode("ascii")
 
         await ws.send_json(
             {
