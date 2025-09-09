@@ -92,11 +92,12 @@ async def twilio_websocket(ws: WebSocket):
 
     async def handle_agent_event(event: AgentEvent):
         """Handle outgoing AgentEvent to Twilio WebSocket"""
-        logger.debug(event)
+
         if event.type == "complete":
             # mark twilio buffer
             # https://www.twilio.com/docs/voice/media-streams/websocket-messages#mark-message
-            return
+            return 
+
         if event.type == "interrupted":
             # https://www.twilio.com/docs/voice/media-streams/websocket-messages#send-a-clear-message
             return await ws.send_json({"event": "clear", "streamSid": stream_sid})
@@ -144,9 +145,15 @@ async def twilio_websocket(ws: WebSocket):
                 send_pcm_to_agent(pcm_bytes, live_request_queue)
 
     try:
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(websocket_loop())
-            tg.create_task(agent_to_client_messaging(handle_agent_event, live_events))
+        websocket_coro = websocket_loop()
+        websocket_task = asyncio.create_task(websocket_coro)
+        messaging_coro = agent_to_client_messaging(handle_agent_event, live_events)
+        messaging_task = asyncio.create_task(messaging_coro)
+        tasks = [websocket_task, messaging_task]
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
     except Exception as ex:
         logger.exception(f"Unexpected Error: {ex}")
     finally:
