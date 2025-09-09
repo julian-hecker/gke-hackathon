@@ -148,7 +148,7 @@ async def twilio_websocket(ws: WebSocket):
             tg.create_task(websocket_loop())
             tg.create_task(agent_to_client_messaging(handle_agent_event, live_events))
     except Exception as ex:
-        logger.error(f"Unexpected Error: {ex}")
+        logger.exception(f"Unexpected Error: {ex}")
     finally:
         live_request_queue.close()
         await ws.close()

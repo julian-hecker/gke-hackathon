@@ -24,7 +24,6 @@ finally:
 ```
 """
 
-
 from typing import AsyncGenerator, Awaitable, Callable, Literal
 
 from google.adk.agents.run_config import RunConfig  # , StreamingMode
@@ -77,7 +76,9 @@ LiveEvents = AsyncGenerator[Event, None]
 
 
 # TODO: Make this *dynamic*
-async def start_agent_session(user_id: str, session_id: str) -> tuple[LiveEvents, LiveRequestQueue]:
+async def start_agent_session(
+    user_id: str, session_id: str
+) -> tuple[LiveEvents, LiveRequestQueue]:
     """Starts an agent session"""
 
     # Create a Runner
@@ -185,4 +186,6 @@ def send_pcm_to_agent(pcm_audio: bytes, live_request_queue: LiveRequestQueue):
         pcm_audio: bytes - Input PCM bytes (16-bit, 16kHz)
         live_request_queue: LiveRequestQueue - The live request queue to send audio to
     """
-    live_request_queue.send_realtime(Blob(data=pcm_audio, mime_type="audio/pcm"))
+    live_request_queue.send_realtime(
+        Blob(data=pcm_audio, mime_type="audio/pcm;rate=16000")
+    )

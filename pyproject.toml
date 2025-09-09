@@ -19,7 +19,7 @@ dev = [
 
 [tool.poe.tasks] # Run scripts using poe, like `poe start`
 adk-web = "adk web libs/adk-agents/src/adk_agents/agents --host 0.0.0.0 --port 8001"
-bridge-dev = "uvicorn voice_bridge.main:app --host 0.0.0.0 --port 8000 --reload --log-level debug"
+bridge-dev = "uvicorn voice_bridge.main:app --host 0.0.0.0 --port 8000 --env-file .env --reload --log-level info"
 bridge-run = "uvicorn voice_bridge.main:app --host 0.0.0.0 --port 8000"
 ngrok = "ngrok http 8000 --url amazing-sincere-grouse.ngrok-free.app"
 
