@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "adk-agents",
     "shared-utils",
+    "anthos-mcp",
     "voice-bridge",
 ]
 
@@ -21,11 +22,14 @@ dev = [
 adk-web = "adk web libs/adk-agents/src/adk_agents/agents --host 0.0.0.0 --port 8001"
 bridge-dev = "uvicorn voice_bridge.main:app --host 0.0.0.0 --port 8000 --env-file .env --reload --log-level info"
 bridge-run = "uvicorn voice_bridge.main:app --host 0.0.0.0 --port 8000"
+mcp-dev = "uvicorn anthos_mcp.main:app --host 0.0.0.0 --port 8002 --env-file .env --reload --log-level info"
+mcp-run = "uvicorn anthos_mcp.main:app --host 0.0.0.0 --port 8002"
 ngrok = "ngrok http 8000 --url amazing-sincere-grouse.ngrok-free.app"
 
 [tool.uv.sources]
 adk-agents = { workspace = true }
 shared-utils = { workspace = true }
+anthos-mcp = { workspace = true }
 voice-bridge = { workspace = true }
 
 [tool.uv.workspace]
