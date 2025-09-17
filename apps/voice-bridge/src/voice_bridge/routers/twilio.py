@@ -2,7 +2,7 @@ import asyncio
 import base64
 from typing import Annotated
 
-from fastapi import APIRouter, Form, Request, Response, WebSocket
+from fastapi import APIRouter, Form, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.params import Depends
 from fastapi.responses import HTMLResponse
 from twilio.twiml.voice_response import Connect, Stream, VoiceResponse
@@ -12,6 +12,7 @@ from adk_agents.runtime.live_messaging import (
     agent_to_client_messaging,
     send_pcm_to_agent,
     start_agent_session,
+    text_to_content,
 )
 
 from voice_bridge.entities.twilio import (
@@ -90,15 +91,21 @@ async def twilio_websocket(ws: WebSocket):
 
     live_events, live_request_queue = await start_agent_session(from_phone, call_sid)
 
+    initial_message = text_to_content(
+        "You're a customer service chatbot. Introduce yourself.", "user"
+    )
+    live_request_queue.send_content(initial_message)
+
     async def handle_agent_event(event: AgentEvent):
         """Handle outgoing AgentEvent to Twilio WebSocket"""
 
         if event.type == "complete":
-            # mark twilio buffer
+            logger.info(f"Agent turn complete at {event.timestamp}")
             # https://www.twilio.com/docs/voice/media-streams/websocket-messages#mark-message
-            return 
+            return
 
         if event.type == "interrupted":
+            logger.info(f"Agent interrupted at {event.timestamp}")
             # https://www.twilio.com/docs/voice/media-streams/websocket-messages#send-a-clear-message
             return await ws.send_json({"event": "clear", "streamSid": stream_sid})
 
@@ -150,50 +157,29 @@ async def twilio_websocket(ws: WebSocket):
         messaging_coro = agent_to_client_messaging(handle_agent_event, live_events)
         messaging_task = asyncio.create_task(messaging_coro)
         tasks = [websocket_task, messaging_task]
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in tasks:
-            if not task.done():
-                task.cancel()
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for p in pending:
+            p.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for d in done:
+            if d.cancelled():
+                continue
+            exception = d.exception()
+            if exception:
+                raise exception
+    except (KeyboardInterrupt, asyncio.CancelledError, WebSocketDisconnect):
+        logger.warning("Process interrupted, exiting...")
     except Exception as ex:
         logger.exception(f"Unexpected Error: {ex}")
     finally:
         live_request_queue.close()
-        await ws.close()
+        try:
+            await ws.close()
+        except Exception as ex:
+            logger.warning(f"Error while closing WebSocket: {ex}")
 
     # https://www.twilio.com/docs/voice/media-streams/websocket-messages
     # {'event': 'connected', 'protocol': 'Call', 'version': '1.0.0'}
     # {'event': 'start', 'sequenceNumber': '1', 'start': {'accountSid': '', 'streamSid': '', 'callSid': '', 'tracks': ['inbound'], 'mediaFormat': {'encoding': 'audio/x-mulaw', 'sampleRate': 8000, 'channels': 1}, 'customParameters': {'caller': ''}}, 'streamSid': ''}
     # {'event': 'media', 'sequenceNumber': '2', 'media': {'track': 'inbound', 'chunk': '1', 'timestamp': '57', 'payload': '+33+/3t7/f3/fvv7fX3+/f5+/vv2fnv8ePt9ff59fn97/nr//3v9fH14+Hj+fv3++3x+/3j+fn35/f58fX3/e/15ff7+ff78+318/X99/P39/nx9f319+v3+fvp9///9/f5+/Pz/fX76//z+/Xx9+//9fv97fn79ev7//Xh9/3v+fP59/f///P7/+3p6/Hj7/Xz/eP59/X79f/7+/n77/g=='}, 'streamSid': ''}
     # {'event': 'stop', 'sequenceNumber': '50', 'streamSid': '', 'stop': {'accountSid': '', 'callSid': ''}}
-
-    # audio_frames = []
-
-    # try:
-    #     while True:
-    #         data = await websocket.receive_json()
-
-    #         if data["event"] == "media":
-    #             ulaw_bytes = base64.b64decode(data["media"]["payload"])
-    #             pcm16 = mulaw_to_pcm(ulaw_bytes)
-    #             # audio_frames.append(pcm16)
-    #             # audio_frames.append(ulaw_bytes)
-    #             back_to_ulaw = pcm_to_mulaw(pcm16)
-    #             audio_frames.append(back_to_ulaw)
-    #             await websocket.send_json(data)
-
-    #     if audio_frames:
-    #         os.makedirs("recordings", exist_ok=True)
-    #         timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-    #         output_filepath = os.path.join("recordings", f"{timestamp}.wav")
-
-    #         wave_write = pywav.WavWrite(output_filepath, 1,8000,8,7)  # 1 stands for mono channel, 8000 sample rate, 8 bit, 7 stands for MULAW encoding
-    #         # wave_write = pywav.WavWrite(output_filepath, 1,24000,16,1)
-    #         wave_write.write(b"".join(audio_frames))
-
-    #         # with wave.open(output_filepath, 'wb') as wf:
-    #         #     wf.setnchannels(1)
-    #         #     wf.setsampwidth(2)
-    #         #     wf.setframerate(24000)
-    #         #     wf.writeframes(b"".join(audio_frames))
-    #         # print(f"Audio saved to {output_filepath}")
-    #     await websocket.close()

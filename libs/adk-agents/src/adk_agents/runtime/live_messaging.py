@@ -26,48 +26,22 @@ finally:
 
 from typing import AsyncGenerator, Awaitable, Callable, Literal
 
-from google.adk.agents.run_config import RunConfig  # , StreamingMode
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.events import Event
 from google.adk.runners import InMemoryRunner  # , Runner
 from google.adk.agents.live_request_queue import LiveRequestQueue
 
 # from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from google.genai.types import Part, Blob
+from google.genai.types import Part, Blob, Content  # noqa: F401
 from pydantic import BaseModel, Field
 
 from adk_agents.agents.search_agent.agent import root_agent
-# from adk_agents.runtime.factory import build_agent_from_profile, make_run_config_for_profile
-
-# AudioOutCallback = Callable[[bytes], None]
-# TextOutCallback = Callable[[str, bool], None]
-
-# @dataclass
-# class SessionHandle:
-#     runner: Runner
-#     run_task: asyncio.Task
-#     live_request_queue: LiveRequestQueue
 
 
-# class SessionService:
-
-#     def __init__(self):
-#         self._sessions: dict[str, SessionHandle] = {}
-#         self._session_service = InMemorySessionService()
-
-#     async def create_or_attach(self, session_id: str, tenant_profile: dict, on_audio: AudioOutCallback):
-#         if session_id in self._sessions:
-#             return self._sessions[session_id]
-
-#         agent = build_agent_from_profile(tenant_profile)
-#         run_config = make_run_config_for_profile(tenant_profile)
-
-#         runner = Runner(app_name=f"{tenant_profile['slug']}_runner", agent=agent, session_service=self._session_service)
-
-#         live_events, live_request_queue = await runner.run_live(run_config=run_config)
-
-#         run_task = asyncio.create_task()
-#         self._sessions[session_id] = SessionHandle(runner, run_task, live_request_queue=live_request_queue)
+def text_to_content(text: str, role: Literal["user", "model"] = "user") -> Content:
+    """Helper to create a Content object from text"""
+    return Content(role=role, parts=[Part(text=text)])
 
 
 APP_NAME = "THE VOICE AGENT"
@@ -83,8 +57,8 @@ async def start_agent_session(
 
     # Create a Runner
     runner = InMemoryRunner(
+        root_agent,
         app_name=APP_NAME,
-        agent=root_agent,
     )
 
     # Create a Session
@@ -94,27 +68,56 @@ async def start_agent_session(
         session_id=session_id,
     )
 
+    speech_config = types.SpeechConfig(
+        voice_config=types.VoiceConfig(
+            # https://ai.google.dev/gemini-api/docs/speech-generation#voices
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
+        ),
+        # https://ai.google.dev/gemini-api/docs/speech-generation#languages
+        language_code="en-US",
+    )
+
+    automatic_activity_detection = types.AutomaticActivityDetection(
+        disabled=False,
+        start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+        end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+        prefix_padding_ms=150,
+        silence_duration_ms=400,
+    )
+    realtime_input_config = types.RealtimeInputConfig(
+        automatic_activity_detection=automatic_activity_detection
+    )
+
     run_config = RunConfig(
-        response_modalities=["AUDIO"],
+        speech_config=speech_config,
+        # response_modalities=["AUDIO"], # Setting this gives Pydantic warning
+        streaming_mode=StreamingMode.BIDI,
         session_resumption=types.SessionResumptionConfig(),
+        input_audio_transcription=types.AudioTranscriptionConfig(),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
+        realtime_input_config=realtime_input_config,
     )
 
     live_request_queue = LiveRequestQueue()
 
     live_events = runner.run_live(
-        session=session,
+        # user_id=user_id, # Using the suggested args fails to create session
+        # session_id=session_id,
         live_request_queue=live_request_queue,
         run_config=run_config,
+        session=session,
     )
     return live_events, live_request_queue
 
 
 class AgentInterruptedEvent(BaseModel):
     type: Literal["interrupted"] = "interrupted"
+    timestamp: float = Field(description="Unix timestamp of interruption")
 
 
 class AgentTurnCompleteEvent(BaseModel):
     type: Literal["complete"] = "complete"
+    timestamp: float = Field(description="Unix timestamp of turn completion")
 
 
 class AgentDataEvent(BaseModel):
@@ -123,6 +126,7 @@ class AgentDataEvent(BaseModel):
 
 
 AgentEvent = AgentInterruptedEvent | AgentTurnCompleteEvent | AgentDataEvent
+
 OnAgentEvent = Callable[[AgentEvent], Awaitable[None]]
 
 
@@ -142,38 +146,42 @@ async def agent_to_client_messaging(
         message: AgentEvent
 
         if event.turn_complete:
-            message = AgentTurnCompleteEvent()
+            message = AgentTurnCompleteEvent(timestamp=event.timestamp)
             await on_agent_event(message)
             continue
 
         if event.interrupted:
-            message = AgentInterruptedEvent()
+            message = AgentInterruptedEvent(timestamp=event.timestamp)
             await on_agent_event(message)
             continue
 
-        # TODO: Look into parts, there's lots of types of parts
-        part: Part = event.content and event.content.parts and event.content.parts[0]  # pyright: ignore[reportAssignmentType]
-
-        if not part:
-            print("Agent sent event without part")
+        if not event.content or not event.content.parts:
+            print("Agent sent empty content", event)
             continue
 
-        is_audio = (
-            part.inline_data
-            and part.inline_data.mime_type
-            and part.inline_data.mime_type.startswith("audio/pcm")
-        )
+        for part in event.content.parts:
+            is_text = hasattr(part, "text") and part.text is not None
+            is_audio = (
+                part.inline_data
+                and part.inline_data.mime_type
+                and part.inline_data.mime_type.startswith("audio/pcm")
+            )
 
-        if not is_audio:
-            print("Agent sent part without audio")
-            continue
+            if is_audio:
+                audio_data = part.inline_data and part.inline_data.data
+                if not audio_data:
+                    continue
+                # twilio_payload = base64.b64encode(audio_data).decode("ascii")
+                message = AgentDataEvent(payload=audio_data)
+                await on_agent_event(message)
+                continue
 
-        audio_data = part.inline_data and part.inline_data.data
-        if audio_data:
-            # payload = base64.b64encode(audio_data).decode("ascii")
-            message = AgentDataEvent(payload=audio_data)
-            await on_agent_event(message)
-            continue
+            elif is_text:
+                print(part.text, end="", flush=True)
+                continue
+
+            else:
+                print("Unknown event content part", event)
 
 
 def send_pcm_to_agent(pcm_audio: bytes, live_request_queue: LiveRequestQueue):

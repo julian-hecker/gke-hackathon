@@ -1,3 +1,5 @@
+# https://github.com/openai/openai-agents-python/issues/304#issuecomment-2746073108
+
 import audioop
 import numpy as np
 import soxr
