@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg-info/
+*.eggs/
+*.egg
+*.manifest
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Tests and coverage
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+
+# Build artifacts
+build/
+dist/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+*.sqlite3
+*.db
+
+# Node
+node_modules/
+
+# Exclude large files
+*.tar.gz
+*.zip
+*.bak
+*.swp
+
+# Exclude notebooks
+*.ipynb
+.ipynb_checkpoints/
