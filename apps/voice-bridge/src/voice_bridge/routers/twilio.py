@@ -23,6 +23,8 @@ from voice_bridge.utils.audio import (
     adk_pcm24k_to_twilio_ulaw8k,
     twilio_ulaw8k_to_adk_pcm16k,
 )
+from voice_bridge.utils.env import is_local
+from voice_bridge.utils.logging import logger
 from voice_bridge.utils.security import validate_twilio
 from voice_bridge.utils.logging import logger
 
@@ -38,8 +40,8 @@ def create_call(req: Request, payload: Annotated[TwilioVoiceWebhookPayload, Form
     """Generate TwiML to connect a call to a Twilio Media Stream"""
 
     host = req.url.hostname
-    ws_protocol = "wss" if req.url.is_secure else "ws"
-    http_protocol = "https" if req.url.is_secure else "http"
+    ws_protocol = "ws" if is_local else "wss"
+    http_protocol = "http" if is_local else "https"
     ws_url = f"{ws_protocol}://{host}{twilio_path}{stream_path}"
     callback_url = f"{http_protocol}://{host}{twilio_path}{callback_path}"
 
