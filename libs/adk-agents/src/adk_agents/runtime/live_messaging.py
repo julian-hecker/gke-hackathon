@@ -28,15 +28,14 @@ from typing import AsyncGenerator, Awaitable, Callable, Literal
 
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.events import Event
-from google.adk.runners import InMemoryRunner  # , Runner
+from google.adk.runners import InMemoryRunner
 from google.adk.agents.live_request_queue import LiveRequestQueue
 
-# from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from google.genai.types import Part, Blob, Content  # noqa: F401
+from google.genai.types import Part, Blob, Content
 from pydantic import BaseModel, Field
 
-from adk_agents.agents.search_agent.agent import root_agent
+from adk_agents.agents.banking_agent.agent import root_agent
 
 
 def text_to_content(text: str, role: Literal["user", "model"] = "user") -> Content:
@@ -177,7 +176,7 @@ async def agent_to_client_messaging(
                 continue
 
             elif is_text:
-                print(part.text, end="", flush=True)
+                # print(part.text, end="", flush=True)
                 continue
 
             else:
