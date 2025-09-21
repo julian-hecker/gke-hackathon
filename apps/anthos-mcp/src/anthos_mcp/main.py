@@ -1,48 +1,65 @@
+import os
 import jwt
 import requests
+import time
 
-from fastmcp import Context, FastMCP
+from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import Response
 
 
-BALANCE_SERVICE_URL = "http://localhost:8080/balances/"
-USER_SERVICE_URL = "http://localhost:8081/login"
+BALANCE_SERVICE_URL = f"http://{os.getenv('BALANCEREADER_SERVICE_HOST', 'localhost')}:{os.getenv('BALANCEREADER_SERVICE_PORT', 8080)}/balances"
+USER_SERVICE_URL = f"http://{os.getenv('USERSERVICE_SERVICE_HOST', 'localhost')}:{os.getenv('USERSERVICE_SERVICE_PORT_HTTP', 8081)}/login"
 
 mcp = FastMCP("Anthos MCP")
 
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> Response:
+    return Response(status_code=200)
+
+
 @mcp.tool()
-async def login(username: str, password: str, ctx: Context) -> str:
-    """Logs in the user"""
-    response = requests.get(USER_SERVICE_URL, params={"username": username, "password": password})
+async def login_for_token(username: str, password: str) -> str:
+    """Logs in the user and returns an access token which is used for authenticating to banking services."""
+    print(username, password)
+    response = requests.get(
+        USER_SERVICE_URL, params={"username": username, "password": password}
+    )
     if response.status_code != 200:
         return "Login failed"
-    
+
     token = response.json().get("token")
-    print(token)
-    payload = jwt.decode(token, algorithms=["HS256"], options={"verify_signature": False})
-    print(payload)
-    exp = payload.get("exp", 0)
-    account_id = payload.get("acct", "")
-
-    ctx.set_state("username", username)
-    ctx.set_state("account_id", account_id)
-    ctx.set_state("expires_at", exp)
-
-    print(ctx._state)
-
-    return "Logged in"
+    return token
 
 
 @mcp.tool()
-def get_balance(ctx: Context) -> str:
-    """Gets the current balance of the user. Must be logged in first."""
-    print(ctx._state)
-    if not ctx.get_state("account_id"):
-        return "User not logged in. Please use the `login` tool first."
-    return "10000"
+def get_balance(access_token: str) -> str:
+    """Gets the current balance of the user. Must provide a valid access token from `login_for_token`."""
+    try:
+        payload = jwt.decode(
+            access_token, algorithms=["HS256"], options={"verify_signature": False}
+        )
+    except jwt.PyJWTError:
+        return "Invalid access token"
+
+    exp = payload.get("exp", 0)
+    if time.time() > exp:
+        return "Access token has expired. Please log in again."
+
+    account_id = payload.get("acct", "")
+    if not account_id:
+        return "Invalid access token"
+
+    response = requests.get(
+        f"{BALANCE_SERVICE_URL}/{account_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if response.status_code != 200:
+        return "Failed to get balance"
+
+    balance = response.json() or 0
+    return f"Your balance is ${balance / 100:.2f} USD"
 
 
 app = mcp.http_app()
-
-if __name__ == "__main__":
-    mcp.run()
