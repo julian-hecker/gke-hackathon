@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: voice-bridge }
+  template:
+    metadata:
+      labels: { app: voice-bridge }
+    spec:
+      containers:
+      - name: voice-bridge
+        image: us-central1-docker.pkg.dev/heckerlabs/heckathon/voice-bridge:latest
+        envFrom:
+          - configMapRef: { name: voice-bridge-config }
+          - secretRef: { name: heckathon-secrets }
+        ports:
+          - containerPort: 8000
+            name: http
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voice-bridge
+spec:
+  type: ClusterIP
+  selector: { app: voice-bridge }
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: voice-healthcheck
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        port: 8000
+        requestPath: /health/
+    checkIntervalSec: 300
+    timeoutSec: 30
+    healthyThreshold: 1
+    unhealthyThreshold: 1
+  targetRef:
+    group: ""
+    kind: Service
+    name: voice-bridge

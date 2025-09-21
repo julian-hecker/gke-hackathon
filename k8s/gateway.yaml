@@ -1,0 +1,86 @@
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: heckathon-gateway
+  annotations:
+    networking.gke.io/certmap: heckathon-certmap
+spec:
+  gatewayClassName: gke-l7-global-external-managed
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+  - name: http
+    protocol: HTTP
+    port: 80
+  addresses:
+  - type: NamedAddress
+    value: heckathon-ip
+
+
+---
+# Redirect HTTP to HTTPS
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-to-https-redirect
+spec:
+  parentRefs:
+  - name: heckathon-gateway
+    sectionName: http
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301
+
+---
+# Voice Bridge Route
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: voicebridge-httproute
+spec:
+  parentRefs:
+  - name: heckathon-gateway
+    sectionName: https
+  hostnames:
+  - voice.heckerlabs.com
+  rules:
+  - backendRefs:
+    - name: voice-bridge
+      port: 80
+
+---
+# Frontend Route
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: frontend-httproute
+spec:
+  parentRefs:
+  - name: heckathon-gateway
+    sectionName: https
+  hostnames:
+  - bank.heckerlabs.com
+  rules:
+  - backendRefs:
+    - name: frontend
+      port: 80
+
+---
+# MCP Server Route
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-httproute
+spec:
+  parentRefs:
+  - name: heckathon-gateway
+  hostnames:
+  - mcp.heckerlabs.com
+  rules:
+  - backendRefs:
+    - name: anthos-mcp
+      port: 80

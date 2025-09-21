@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./configmap.yaml
+  - ./voice-bridge.yaml
+  - ./gateway.yaml
+  - ./anthos-mcp.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/extras/jwt/jwt-secret.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/accounts-db.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/balance-reader.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/config.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/contacts.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/frontend.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/ledger-db.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/ledger-writer.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/loadgenerator.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/transaction-history.yaml
+  - https://raw.githubusercontent.com/GoogleCloudPlatform/bank-of-anthos/refs/heads/main/kubernetes-manifests/userservice.yaml
+
+secretGenerator:
+- name: heckathon-secrets
+  envs:
+  - .env
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Modify the frontend service to be ClusterIP for use with GKE Gateway
+patches:
+  - target:
+      group: ""
+      version: v1
+      kind: Service
+      name: frontend
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
