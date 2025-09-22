@@ -1,4 +1,6 @@
 import os
+from typing import Annotated
+from uuid import uuid4
 import jwt
 import requests
 import time
@@ -10,6 +12,7 @@ from starlette.responses import Response
 
 BALANCE_SERVICE_URL = f"http://{os.getenv('BALANCEREADER_SERVICE_HOST', 'localhost')}:{os.getenv('BALANCEREADER_SERVICE_PORT', 8080)}/balances"
 USER_SERVICE_URL = f"http://{os.getenv('USERSERVICE_SERVICE_HOST', 'localhost')}:{os.getenv('USERSERVICE_SERVICE_PORT_HTTP', 8081)}/login"
+LEDGERWRITER_SERVICE_URL = f"http://{os.getenv('LEDGERWRITER_SERVICE_HOST', 'localhost')}:{os.getenv('LEDGERWRITER_SERVICE_PORT', 8082)}/transactions"
 
 mcp = FastMCP("Anthos MCP")
 
@@ -60,6 +63,48 @@ def get_balance(access_token: str) -> str:
 
     balance = response.json() or 0
     return f"Your balance is ${balance / 100:.2f} USD"
+
+
+@mcp.tool()
+def add_transaction(
+    access_token: Annotated[str, "Access token from login"],
+    to_account: Annotated[str, "Account number to send money to"],
+    amount: Annotated[float, "Amount to send, in US Dollars"],
+) -> str:
+    """Adds a transaction to the ledger. Must provide a valid access token from `login_for_token`."""
+    try:
+        payload = jwt.decode(
+            access_token, algorithms=["HS256"], options={"verify_signature": False}
+        )
+    except jwt.PyJWTError:
+        return "Invalid access token"
+
+    exp = payload.get("exp", 0)
+    if time.time() > exp:
+        return "Access token has expired. Please log in again."
+
+    account_id = payload.get("acct", "")
+    if not account_id:
+        return "Invalid access token"
+
+    transaction = {
+        "fromAccountNum": account_id,
+        "toAccountNum": to_account,
+        "amount": amount / 100,  # convert dollars to cents
+        "toRoutingNum": "883745000",  # Hardcoded fake routing number
+        "fromRoutingNum": "883745000",  # Hardcoded fake routing number
+        "uuid": uuid4().hex,
+    }
+
+    response = requests.post(
+        LEDGERWRITER_SERVICE_URL,
+        json=transaction,
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if not response.ok:
+        return "Failed to add transaction: " + response.text
+
+    return "Transaction added successfully"
 
 
 app = mcp.http_app()

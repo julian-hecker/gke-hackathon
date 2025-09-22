@@ -26,7 +26,6 @@ from voice_bridge.utils.audio import (
 from voice_bridge.utils.env import is_local
 from voice_bridge.utils.logging import logger
 from voice_bridge.utils.security import validate_twilio
-from voice_bridge.utils.logging import logger
 
 
 twilio_path = "/twilio"

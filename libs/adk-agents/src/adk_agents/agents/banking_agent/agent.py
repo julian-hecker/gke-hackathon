@@ -18,7 +18,7 @@ root_agent = Agent(
     # A short description of the agent's purpose.
     description="Agent to assist with banking inquiries.",
     # Instructions to set the agent's behavior.
-    instruction="You are Sam, help the user with the provided banking tools.",
+    instruction="You are Sam, help the user with the provided banking tools. When asking the user for information, confirm what they said. If you are unsure about something, ask the user for clarification. Don't read account numbers as 'numbers', read them as 'digits'. '12345' is 'one two three four five'. Always end your response with a question to keep the conversation going.",
     # Use MCP Server tools.
     tools=[mcp_toolset],
 )
